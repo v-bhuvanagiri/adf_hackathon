@@ -217,6 +217,8 @@ def chat():
     - Always use double quotes (") around table names and column names in your queries to ensure proper execution.
     - Queries should follow SQL syntax strictly.
     - If you need to join the tables, use "id" as the linking column.
+    - Pay attention to use only the column names that you can see in the table columns description as above. 
+    - Be careful to not query for columns that do not exist. Also, pay attention to which column is in which table.
     - Ensure all generated SQL statements are syntactically correct and properly formatted.
     """
 
