@@ -172,12 +172,48 @@ def login():
 
 
 
+
 @app.route('/chat', methods=['POST'])
 @token_required
 def chat():
     data = request.json
     messages = data.get('messages', [])
     user_role = data.get('role')  # Get the user's role from the request
+
+    # Base prompt for the LLM
+    base_prompt = """
+        We have two tables, bap_table and current_accounts_table, each containing different columns. 
+        Both tables share a common column, id, which serves as a primary/foreign key for linking records between the two tables.
+
+    bap_table contains details related to the BAP program, a special initiative designed to help customers who have taken out loans by assisting them with repayment. 
+    Here are the names and descriptions of column headers for bap_table:
+{
+    "id": "The unique identifier for each loan account, associated with a specific customer",
+    "createddate": "The date when the BAP offer was created for a loan account",
+    "BAP_offer_status": "The status of the BAP offer (e.g., BAP eligible, offer sent, etc.)",
+    "offer_send_dt": "The date when the BAP offer was sent",
+    "acceptance_date__c": "The date when the BAP offer was accepted by the customer",
+    "offer_type": "Offer type, either 65% offer or 50% offer"
+}
+
+current_accounts_table holds information about the loan accounts as of the current date. 
+Names and descriptions of column headers for current_accounts_table:
+{
+    "id": "The unique identifier for each loan account, associated with a specific customer",
+    "current_dpd": "Days Past Due (DPD), which represents the number of days the loan account is overdue beyond the due date",
+    "close_dt": "The date when the customer’s loan account was closed",
+    "charge_off_date": "The date when the loan account was written off",
+    "gross_co_bal": "The total charged-off balance, including both interest and principal amounts of the loan",
+    "curr_status": "The current status of the loan, such as 'Closed - Written Off', 'Active - Good Standing', etc.",
+    "curr_pymt_type": "The payment type for the loan, either 'recurring' or 'non-recurring'",
+    "curr_prin_bal": "The remaining principal balance that still needs to be repaid on the loan"
+}
+*Important Notes:*
+- Always use double quotes (") around table names and column names in your queries to ensure proper execution.
+- Queries should follow SQL syntax strictly.
+- If you need to join the tables, use "id" as the linking column.
+- Ensure all generated SQL statements are syntactically correct and properly formatted.
+"""
 
     graph_type = None
     query = None
@@ -187,16 +223,19 @@ def chat():
         latest_message = messages[-1].get('content', '')
         print(f"Latest Message: {latest_message}")
 
+        # Prepend the base prompt to the user's message
+        enriched_prompt = f"{base_prompt}\n\n{latest_message}"
+        print(f"Enriched Prompt: {enriched_prompt}")
+
         if "help" in latest_message.lower():
             is_help = True
-            help_prompt =  f"{latest_message} Kindly ensure the output is well formatted."
+            help_prompt = f"{enriched_prompt} Kindly ensure the output is well formatted."
 
-        # Check if the latest message includes graph instructions
         elif "plot" in latest_message.lower():
-            graph_type = latest_message
+            graph_type = enriched_prompt
             print(f"Graph Type: {graph_type}")
         else:
-            query = latest_message
+            query = enriched_prompt
             print("Query:", query)
 
     if is_help:
@@ -204,67 +243,39 @@ def chat():
             return jsonify({"error": "Document search or processing chain is not initialized."}), 500
 
         try:
-            # Define your question here or adapt based on the incoming request
-            
-
-            # Perform similarity search in the document
             docs = docsearch.similarity_search(help_prompt)
-
-            # Generate answer based on the document content
             answer = chain.run(input_documents=docs, question=help_prompt)
             print(f"Answer: {answer}")
-
             return Response(answer, mimetype='text/plain')
-
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
     elif query:
-        if user_role:
-            # Define the table names based on role
-            allowed_table = user_role
-            restricted_table = "inventory" if user_role == "store" else "store"
-
-            # Check if the query attempts to access the restricted table
-            if restricted_table in query.lower():
-                output_response= f"You are restricted from accessing the {restricted_table} table."
-                return Response(output_response, mimetype='text/plain')
-            
-            # Modify the query to restrict it to the allowed table
-            extended_query = f"Please use only the {allowed_table} table for this query: {query} ..... If the input query requires usage of {restricted_table} return a response message saying you are restricted from accessing {restricted_table}. Kindly return the output as a markdown text."
         try:
-            result = agent_executor.invoke(extended_query)
+            result = agent_executor.invoke(query)
             output = result['output']
-
             return Response(output, mimetype='text/plain')
-
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-            
+
     elif graph_type:
         try:
             print("Generating Graph...")
             graph_prompt = "You are a data analyst. Fetch the data according to the user's request and return it as JSON with keys 'type' for the graph type, 'x' for the x-axis data, and 'y' for the y-axis data. The prompt is: " + graph_type
-            
             result = agent_executor.invoke(graph_prompt)
             output = result['output']
-            print(output)
-            # Extract JSON part from the output using regular expressions
             match = re.search(r'\{.*\}', output, re.DOTALL)
             if match:
                 json_data = match.group(0)
-                graph_data = eval(json_data)  # Convert string to dictionary
+                graph_data = eval(json_data)
                 print(f"Graph Data: {graph_data}")
-
                 return jsonify(graph_data)
             else:
                 return jsonify({"error": "No valid JSON found in the response"}), 500
-
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
     return jsonify({"error": "No valid query or graph request found"}), 400
-
 
 
 @app.route('/upload_data', methods=['POST'])
