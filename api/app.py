@@ -1,3 +1,4 @@
+
 import re
 from flask import Flask, request, Response, jsonify
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -23,7 +24,9 @@ from langchain_community.vectorstores import FAISS
 from langchain.chains.question_answering import load_qa_chain
 import psycopg2
 from psycopg2.extras import RealDictCursor
-
+import subprocess
+from werkzeug.utils import secure_filename
+import os
 load_dotenv()
 
 app = Flask(__name__)
@@ -36,13 +39,13 @@ users = {
         'password': generate_password_hash('admin'),
         'role': 'admin'
     },
-    'salesemployee': {
-        'password': generate_password_hash('salesemployee'),
-        'role': 'store'
+    'vaishnavi': {
+        'password': generate_password_hash('vaishnavi'),
+        'role': 'analytics'
     },
-     'inventorymanager': {
-        'password': generate_password_hash('inventorymanager'),
-        'role': 'inventory'
+     'employee': {
+        'password': generate_password_hash('employee'),
+        'role': 'operations'
     }
 }
 
@@ -61,6 +64,12 @@ agent_executor = create_sql_agent(llm, db=db, agent_type="openai-tools", verbose
 
 docsearch = None
 chain = None
+UPLOAD_FOLDER = "uploads"
+ALLOWED_EXTENSIONS = {"pdf"}  
+
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 
 def token_required(f):
     @wraps(f)
@@ -75,67 +84,6 @@ def token_required(f):
         return f(*args, **kwargs)
     return decorated
 
-
-
-def fetch_pdf_url(role):
-    try:
-        # Establish a connection to the PostgreSQL database with the corrected URI
-        connection = psycopg2.connect(DB_URI)
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
-        
-        # Execute the SQL query to fetch the PDF URL based on the user's role
-        cursor.execute(f"SELECT Url FROM Manual WHERE Role = '{role}'")
-        
-        # Fetch the result
-        result = cursor.fetchone()
-        # Close the cursor and connection
-        cursor.close()
-        connection.close()
-        
-        # If a URL is found, return it
-        if result and 'url' in result:
-            return result['url']
-        else:
-            print("No URL found for the given role.")
-            return None
-
-    except (Exception, psycopg2.DatabaseError) as e:
-        print(f"Failed to fetch PDF URL: {str(e)}")
-        return None
-
-def fetch_and_process_pdf(pdf_url):
-    
-    global docsearch, chain
-    
-    try:
-        response = requests.get(pdf_url)
-        response.raise_for_status()  
-        pdf_file = BytesIO(response.content)
-
-        pdf_reader = PdfReader(pdf_file)
-        raw_text = ''
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                raw_text += text
-        
-        # Split text and create FAISS index
-        text_splitter = CharacterTextSplitter(
-            separator="\n",
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-        )
-        texts = text_splitter.split_text(raw_text)
-        embeddings = OpenAIEmbeddings()
-        docsearch = FAISS.from_texts(texts, embeddings)
-
-        chain = load_qa_chain(OpenAI(), chain_type="stuff")
-        
-        print("PDF fetched and processed successfully")
-
-    except requests.RequestException as e:
-        print(f"Failed to fetch PDF: {str(e)}")
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -156,16 +104,10 @@ def login():
             'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
         }, app.config['SECRET_KEY'])
         
-        # Fetch the PDF URL based on user role and process the PDF
-        # pdf_url = fetch_pdf_url(user['role'])
-       
-        # if pdf_url:
-        #     fetch_and_process_pdf(pdf_url)
-        
         return jsonify({
             'token': token,
             'role': user['role'],
-            'username': auth.get('username')  # Return the username
+            'username': auth.get('username')  
         })
 
     return jsonify({'message': 'Could not verify'}), 401
@@ -178,9 +120,9 @@ def login():
 def chat():
     data = request.json
     messages = data.get('messages', [])
-    user_role = data.get('role')  # Get the user's role from the request
+    user_role = data.get('role')  
 
-    # Base prompt for the LLM
+    
     base_prompt = """
         We have two tables, bap_table and current_accounts_table, each containing different columns. 
         Both tables share a common column, id, which serves as a primary/foreign key for linking records between the two tables.
@@ -208,7 +150,7 @@ Names and descriptions of column headers for current_accounts_table:
     "curr_pymt_type": "The payment type for the loan, either 'recurring' or 'non-recurring'",
     "curr_prin_bal": "The remaining principal balance that still needs to be repaid on the loan"
 }
-*Important Notes:*
+Important Notes:
 - Always use double quotes (") around table names and column names in your queries to ensure proper execution.
 - Queries should follow SQL syntax strictly.
 - If you need to join the tables, use "id" as the linking column.
@@ -223,7 +165,6 @@ Names and descriptions of column headers for current_accounts_table:
         latest_message = messages[-1].get('content', '')
         print(f"Latest Message: {latest_message}")
 
-        # Prepend the base prompt to the user's message
         enriched_prompt = f"{base_prompt}\n\n{latest_message}"
         print(f"Enriched Prompt: {enriched_prompt}")
 
@@ -278,44 +219,54 @@ Names and descriptions of column headers for current_accounts_table:
     return jsonify({"error": "No valid query or graph request found"}), 400
 
 
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.route('/upload_data', methods=['POST'])
 @token_required
 def upload_data():
-    data = request.json
-    url = data.get('url')
-    role = data.get('role')
+    if 'file' not in request.files:
+        return jsonify({"message": "No file part"}), 400
 
-    try:
-        # Establish a connection to the PostgreSQL database
-        connection = psycopg2.connect(DB_URI)
-        cursor = connection.cursor()
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"message": "No selected file"}), 400
 
-        # Check if the role already exists
-        cursor.execute("SELECT * FROM Manual WHERE Role = %s", (role,))
-        existing_entry = cursor.fetchone()
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(file_path)
 
-        if existing_entry:
-            # If the role exists, update the URL
-            cursor.execute("UPDATE Manual SET Url = %s WHERE Role = %s", (url, role))
-        else:
-            # If the role doesn't exist, insert a new entry
-            cursor.execute("INSERT INTO Manual (Role, Url) VALUES (%s, %s)", (role, url))
+        try:
+            global docsearch, chain
 
-        # Commit the transaction
-        connection.commit()
+            pdf_reader = PdfReader(file_path)
+            raw_text = ''
+            for page in pdf_reader.pages:
+                text = page.extract_text()
+                if text:
+                    raw_text += text
 
-        # Close the cursor and connection
-        cursor.close()
-        connection.close()
+           
+            text_splitter = CharacterTextSplitter(
+                separator="\n",
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+            )
+            texts = text_splitter.split_text(raw_text)
+            embeddings = OpenAIEmbeddings()
+            docsearch = FAISS.from_texts(texts, embeddings)
 
-        return jsonify({"message": "Data uploaded successfully"}), 200
+            chain = load_qa_chain(OpenAI(), chain_type="stuff")
 
-    except Exception as e:
-        print(f"Failed to upload data: {str(e)}")
-        return jsonify({"message": "Failed to upload data"}), 500
+            return jsonify({"message": "File uploaded and processed successfully"}), 200
 
+        except Exception as e:
+            print(f"Failed to process file: {str(e)}")
+            return jsonify({"message": "Failed to process file"}), 500
 
-
+    return jsonify({"message": "Invalid file type"}), 400
 
 if __name__ == '__main__':
     app.run(debug=True)
