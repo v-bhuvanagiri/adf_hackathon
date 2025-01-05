@@ -182,38 +182,43 @@ def chat():
 
     # Base prompt for the LLM
     base_prompt = """
-        We have two tables, bap_table and current_accounts_table, each containing different columns. 
-        Both tables share a common column, id, which serves as a primary/foreign key for linking records between the two tables.
+    We have two tables, bap_table and current_accounts_table, each containing different columns. 
+    Both tables share a common column, id, which serves as a primary/foreign key for linking records between the two tables.
 
     bap_table contains details related to the BAP program, a special initiative designed to help customers who have taken out loans by assisting them with repayment. 
-    Here are the names and descriptions of column headers for bap_table:
-{
-    "id": "The unique identifier for each loan account, associated with a specific customer",
-    "createddate": "The date when the BAP offer was created for a loan account",
-    "BAP_offer_status": "The status of the BAP offer (e.g., BAP eligible, offer sent, etc.)",
-    "offer_send_dt": "The date when the BAP offer was sent",
-    "acceptance_date__c": "The date when the BAP offer was accepted by the customer",
-    "offer_type": "Offer type, either 65% offer or 50% offer"
-}
+    bap_table conatains all the BAP eligible loan accounts uniquely identified by 'id' column. 
 
-current_accounts_table holds information about the loan accounts as of the current date. 
-Names and descriptions of column headers for current_accounts_table:
-{
-    "id": "The unique identifier for each loan account, associated with a specific customer",
-    "current_dpd": "Days Past Due (DPD), which represents the number of days the loan account is overdue beyond the due date",
-    "close_dt": "The date when the customer’s loan account was closed",
-    "charge_off_date": "The date when the loan account was written off",
-    "gross_co_bal": "The total charged-off balance, including both interest and principal amounts of the loan",
-    "curr_status": "The current status of the loan, such as 'Closed - Written Off', 'Active - Good Standing', etc.",
-    "curr_pymt_type": "The payment type for the loan, either 'recurring' or 'non-recurring'",
-    "curr_prin_bal": "The remaining principal balance that still needs to be repaid on the loan"
-}
-*Important Notes:*
-- Always use double quotes (") around table names and column names in your queries to ensure proper execution.
-- Queries should follow SQL syntax strictly.
-- If you need to join the tables, use "id" as the linking column.
-- Ensure all generated SQL statements are syntactically correct and properly formatted.
-"""
+    Here are the names and descriptions of column headers for bap_table:
+    
+    {
+        "id": "The unique identifier for each loan account, associated with a specific customer",
+        "createddate": "The date when the BAP offer was created for a loan account",
+        "BAP_offer_status": "The status of the BAP offer (e.g., Offer Expired, Program and Reschedule completed etc)",
+        "offer_send_dt": "The date when the BAP offer was sent to loans account ids",
+        "acceptance_date__c": "The date when the BAP offer was accepted by the customer for whom the offer is sent",
+        "offer_type": "Offer type, either '65' or '50' which refers to percentage reduction in payment in particular cycle of repayment. "
+    }
+
+    current_accounts_table holds information about the loan accounts as of the current date. 
+    Names and descriptions of column headers for current_accounts_table are as follows:
+    
+    {
+        "id": "The unique identifier for each loan account, associated with a specific customer",
+        "current_dpd": "Days Past Due (DPD), which represents the number of days the loan account not paid the amount beyond the due date",
+        "close_dt": "The date when the customer's loan account was closed",
+        "charge_off_date": "The date when the loan account was charged off or written off",
+        "gross_co_bal": "The total charged-off balance, including both interest and principal amounts of the loan",
+        "curr_status": "The current status of the loan, such as 'Closed - Written Off', 'Active - Good Standing', 'Active - Bad Standing', 'Closed - Obligations met' etc. ",
+        "curr_pymt_type": "The payment type for the loan, either 'Recurring' or 'Non Recurring'",
+        "curr_prin_bal": "The remaining principal balance that still needs to be repaid by the loan account customer"
+    }
+
+    *Important Notes:*
+    - Always use double quotes (") around table names and column names in your queries to ensure proper execution.
+    - Queries should follow SQL syntax strictly.
+    - If you need to join the tables, use "id" as the linking column.
+    - Ensure all generated SQL statements are syntactically correct and properly formatted.
+    """
 
     graph_type = None
     query = None
